@@ -3,345 +3,253 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Cadenza — AI Music Generator</title>
+  <title>Cadenza - AI Music Generator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<canvas id="bgCanvas" aria-hidden="true"></canvas>
 
-<div class="shell">
+<main class="app-shell">
+  <aside class="side-rail">
+    <header class="brand">
+      <div class="logo-text">Cadenza</div>
+      <div class="tagline">Music Composer</div>
+    </header>
 
-  <div class="glass header">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
-      <div>
-        <div class="logo-row">
-          <div class="logo-icon">🎵</div>
+    <section class="glass-panel">
+      <div class="panel-head">
+        <span class="panel-kicker">Music Settings</span>
+        <span class="panel-mark">01</span>
+      </div>
+      <div class="field">
+        <label class="field-label">Key</label>
+        <select id="selKey">
+          <option>C</option><option>C#</option><option>D</option><option>D#</option>
+          <option>E</option><option>F</option><option>F#</option><option>G</option>
+          <option>G#</option><option>A</option><option>A#</option><option>B</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Scale</label>
+        <select id="selScale">
+          <option>major</option><option>minor</option><option>pentatonic</option>
+          <option>blues</option><option>dorian</option><option>mixolydian</option>
+        </select>
+      </div>
+      <div class="slider-row">
+        <div class="slider-meta"><span>Tempo</span><span class="slider-val" id="lTempo">88 BPM</span></div>
+        <input type="range" id="rTempo" min="40" max="220" step="1" value="88">
+      </div>
+    </section>
+
+    <section class="glass-panel">
+      <div class="panel-head">
+        <span class="panel-kicker">Model Parameters</span>
+        <span class="panel-mark">02</span>
+      </div>
+      <div class="slider-row">
+        <div class="slider-meta"><span>Creativity</span><span class="slider-val" id="lTemp">0.30</span></div>
+        <input type="range" id="rTemp" min="0.05" max="0.95" step="0.05" value="0.30">
+      </div>
+      <div class="slider-row">
+        <div class="slider-meta"><span>Length</span><span class="slider-val" id="lNotes">16</span></div>
+        <input type="range" id="rNotes" min="4" max="48" step="2" value="16">
+      </div>
+      <div class="slider-row">
+        <div class="slider-meta"><span>Volume</span><span class="slider-val" id="lVol">70%</span></div>
+        <input type="range" id="rVol" min="10" max="100" step="5" value="70">
+      </div>
+    </section>
+
+    <section class="glass-panel nav-panel">
+      <div class="panel-head">
+        <span class="panel-kicker">Workspace</span>
+        <span class="panel-mark">03</span>
+      </div>
+      <div class="nav">
+        <button class="nav-btn active" data-tab="generate">Generate</button>
+        <button class="nav-btn" data-tab="train">Train</button>
+        <button class="nav-btn" data-tab="explore">Explore</button>
+      </div>
+      <div class="status-card">
+        <span class="status-dot"></span>
+        <div>
+          <span id="statusDot" class="playing-dot" style="visibility:hidden"><span></span> Playing</span>
+          <strong id="s-status" class="stat-val green">Idle</strong>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <section class="main-studio">
+    <header class="top-bar">
+      <div class="genre-rail">
+        <button class="genre-pill active" data-genre="Classical" style="--gc:#F6D89B;--gs:rgba(246,216,155,0.24)">Classical</button>
+        <button class="genre-pill" data-genre="Jazz" style="--gc:#F7A95A;--gs:rgba(247,169,90,0.24)">Jazz</button>
+        <button class="genre-pill" data-genre="Ambient" style="--gc:#62F4E6;--gs:rgba(98,244,230,0.24)">Ambient</button>
+        <button class="genre-pill" data-genre="Blues" style="--gc:#6AB7FF;--gs:rgba(106,183,255,0.24)">Blues</button>
+        <button class="genre-pill" data-genre="Celtic" style="--gc:#7AF5B5;--gs:rgba(122,245,181,0.24)">Celtic</button>
+      </div>
+      <div class="top-actions">
+        <div class="mini-meter"><span></span><span></span><span></span><span></span><span></span></div>
+      </div>
+    </header>
+
+    <div id="tab-generate">
+      <section class="stage-card">
+        <div class="stage-head">
           <div>
-            <div class="logo-text">Cadenza</div>
-            <div class="tagline">AI Music Generation Studio</div>
+            <div class="eyebrow">Opal Wave Composer</div>
+            <h1>Generate elegant looping music</h1>
+          </div>
+          <div class="stats-strip">
+            <div class="stat"><div class="stat-label">Genre</div><div class="stat-val accent" id="s-genre">Classical</div></div>
+            <div class="stat"><div class="stat-label">Key / Scale</div><div class="stat-val" id="s-key">C major</div></div>
+            <div class="stat"><div class="stat-label">Tempo</div><div class="stat-val" id="s-tempo">88 BPM</div></div>
+            <div class="stat"><div class="stat-label">Notes</div><div class="stat-val" id="s-notes">-</div></div>
           </div>
         </div>
-        <div class="badge-row">
-          <span class="badge">LSTM</span>
-          <span class="badge">GAN</span>
-          <span class="badge green">Markov Chain</span>
-          <span class="badge orange">Web Audio API</span>
-          <span class="badge pink">MIDI Export</span>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-        <div id="statusDot" class="playing-dot" style="visibility:hidden">
-          <span></span> Playing
-        </div>
-        <div style="font-size:11px;color:#A0A0C0">Open in Chrome for best audio</div>
-      </div>
-    </div>
-  </div>
 
-  <div class="glass genre-rail" style="border-radius:20px;margin-bottom:1.25rem">
-    <button class="genre-pill active" data-genre="Classical" style="--gc:#6C63FF;--gs:rgba(108,99,255,0.35)">🎻 Classical</button>
-    <button class="genre-pill" data-genre="Jazz" style="--gc:#F97316;--gs:rgba(249,115,22,0.35)">🎷 Jazz</button>
-    <button class="genre-pill" data-genre="Ambient" style="--gc:#10B981;--gs:rgba(16,185,129,0.35)">🌊 Ambient</button>
-    <button class="genre-pill" data-genre="Blues" style="--gc:#8B5CF6;--gs:rgba(139,92,246,0.35)">🎸 Blues</button>
-    <button class="genre-pill" data-genre="Celtic" style="--gc:#0EA5E9;--gs:rgba(14,165,233,0.35)">🪈 Celtic</button>
-  </div>
-
-  <div class="glass nav" style="padding:4px;margin-bottom:1.25rem">
-    <button class="nav-btn active" data-tab="generate">
-      <span class="icon">✨</span> Generate
-    </button>
-    <button class="nav-btn" data-tab="train">
-      <span class="icon">🧠</span> Train Model
-    </button>
-    <button class="nav-btn" data-tab="explore">
-      <span class="icon">🎼</span> Explore
-    </button>
-  </div>
-
-  <div id="tab-generate">
-    <div class="stats-strip">
-      <div class="stat"><div class="stat-label">Genre</div><div class="stat-val accent" id="s-genre">Classical</div></div>
-      <div class="stat"><div class="stat-label">Key / Scale</div><div class="stat-val" id="s-key">C major</div></div>
-      <div class="stat"><div class="stat-label">Tempo</div><div class="stat-val" id="s-tempo">88 BPM</div></div>
-      <div class="stat"><div class="stat-label">Notes</div><div class="stat-val" id="s-notes">—</div></div>
-      <div class="stat"><div class="stat-label">Status</div><div class="stat-val green" id="s-status">Idle</div></div>
-    </div>
-
-    <div class="grid-2" style="margin-bottom:10px">
-      <div class="card">
-        <div class="section-label">Music settings</div>
-        <div class="col">
-          <div class="grid-2">
-            <div class="field">
-              <label class="field-label">Root key</label>
-              <select id="selKey">
-                <option>C</option><option>C#</option><option>D</option><option>D#</option>
-                <option>E</option><option>F</option><option>F#</option><option>G</option>
-                <option>G#</option><option>A</option><option>A#</option><option>B</option>
-              </select>
-            </div>
-            <div class="field">
-              <label class="field-label">Scale mode</label>
-              <select id="selScale">
-                <option>major</option><option>minor</option><option>pentatonic</option>
-                <option>blues</option><option>dorian</option><option>mixolydian</option>
-              </select>
-            </div>
-          </div>
-          <div class="slider-row">
-            <div class="slider-meta">
-              <span>Note count</span><span class="slider-val" id="lNotes">16</span>
-            </div>
-            <input type="range" id="rNotes" min="4" max="48" step="2" value="16">
+        <div class="wave-card">
+          <div class="wave-grid"></div>
+          <canvas id="waveCanvas" width="1240" height="320"></canvas>
+          <div class="timeline">
+            <span>00:00</span><span>Intro</span><span>Theme A</span><span>Build</span><span>Theme B</span><span>Outro</span><span>Loop</span>
           </div>
         </div>
-      </div>
 
-      <div class="card">
-        <div class="section-label">Model parameters</div>
-        <div class="col">
-          <div class="slider-row">
-            <div class="slider-meta">
-              <span>Tempo</span><span class="slider-val" id="lTempo">88 BPM</span>
-            </div>
-            <input type="range" id="rTempo" min="40" max="220" step="1" value="88">
+        <div class="roll-wrap">
+          <canvas id="rollCanvas" width="1240" height="130"></canvas>
+        </div>
+      </section>
+
+      <section class="transport glass-panel">
+        <div class="play-cluster">
+          <button class="btn btn-ghost" id="btnPlay" disabled>
+            <span class="btn-icon" id="playIcon">Play</span>
+            <span id="playLabel"></span>
+          </button>
+          <button class="btn btn-ghost" id="btnExport" disabled>MIDI</button>
+        </div>
+        <button class="btn btn-primary" id="btnGenerate">Generate</button>
+        <div id="noteCounter" class="note-counter"></div>
+      </section>
+
+      <section class="footer-grid">
+        <div class="glass-panel console-panel">
+          <div class="panel-head">
+            <span class="panel-kicker">Console</span>
+            <button id="btnClearLog" class="text-button">Clear</button>
           </div>
-          <div class="slider-row">
-            <div class="slider-meta">
-              <span>Creativity (temperature)</span><span class="slider-val" id="lTemp">0.30</span>
-            </div>
-            <input type="range" id="rTemp" min="0.05" max="0.95" step="0.05" value="0.30">
-            <div class="slider-hints"><span>Structured</span><span>Experimental</span></div>
+          <div class="console" id="console">
+            <div class="log-line"><span class="log-t"></span><span class="log-info">Cadenza ready - generate a melody.</span></div>
           </div>
-          <div class="slider-row">
-            <div class="slider-meta">
-              <span>Volume</span><span class="slider-val" id="lVol">70%</span>
-            </div>
-            <input type="range" id="rVol" min="10" max="100" step="5" value="70">
+          <div class="health-row">
+            <div><span>Harmony</span><strong>OK</strong></div>
+            <div><span>Melody</span><strong>OK</strong></div>
+            <div><span>Rhythm</span><strong>OK</strong></div>
+            <div><span>Mix</span><strong>Live</strong></div>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="grid-3" style="margin-bottom:10px">
-      <button class="btn btn-primary" id="btnGenerate">
-        <span class="btn-icon">✨</span> Generate melody
-      </button>
-      <button class="btn btn-ghost" id="btnPlay" disabled>
-        <span class="btn-icon" id="playIcon">▶</span>
-        <span id="playLabel">Play</span>
-      </button>
-      <button class="btn btn-ghost" id="btnExport" disabled>
-        <span class="btn-icon">⬇</span> MIDI
-      </button>
-    </div>
-
-    <div class="wave-card" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="section-label" style="margin-bottom:0">Waveform output</div>
-        <div id="noteCounter" style="font-size:11px;color:#A0A0C0"></div>
-      </div>
-      <canvas id="waveCanvas" width="760" height="70"></canvas>
-    </div>
-
-    <div class="card" style="margin-bottom:10px" id="rollCard">
-      <div class="section-label">Piano roll</div>
-      <div class="roll-wrap">
-        <canvas id="rollCanvas" width="760" height="90"></canvas>
-      </div>
-    </div>
-
-    <div class="card" id="noteCard">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="section-label" style="margin-bottom:0">Note sequence</div>
-        <div id="seqStats" style="font-size:11px;color:#A0A0C0"></div>
-      </div>
-      <div id="noteGrid">
-        <span style="font-size:12px;color:#C0C0DC;align-self:center">Generate a melody to see notes here</span>
-      </div>
-      <div class="info-bar" id="infoBar" style="display:none"></div>
-    </div>
-  </div>
-
-  <div id="tab-train" style="display:none">
-    <div class="grid-2" style="margin-bottom:10px">
-      <div class="card">
-        <div class="section-label">Training dataset</div>
-        <div class="col" id="datasetList">
-          <button class="option-btn active" data-group="dataset" data-val="Classical MIDI">
-            <div class="opt-title">Classical MIDI</div>
-            <div class="opt-sub">1,200 pieces · Bach, Mozart, Beethoven</div>
-          </button>
-          <button class="option-btn" data-group="dataset" data-val="Jazz Standards">
-            <div class="opt-title">Jazz Standards</div>
-            <div class="opt-sub">400 pieces · chord-rich progressions</div>
-          </button>
-          <button class="option-btn" data-group="dataset" data-val="Bach Chorales">
-            <div class="opt-title">Bach Chorales</div>
-            <div class="opt-sub">380 chorales · 4-part harmony</div>
-          </button>
-          <button class="option-btn" data-group="dataset" data-val="Pop / Rock">
-            <div class="opt-title">Pop / Rock</div>
-            <div class="opt-sub">2,100 pieces · hook-driven melody</div>
-          </button>
-          <button class="option-btn" data-group="dataset" data-val="Folk & Celtic">
-            <div class="opt-title">Folk & Celtic</div>
-            <div class="opt-sub">600 pieces · modal, pentatonic</div>
-          </button>
+        <div class="glass-panel levels-panel">
+          <div class="panel-head"><span class="panel-kicker">Levels</span><span id="seqStats"></span></div>
+          <div class="level-bars">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div id="noteGrid" class="note-grid">
+            <span class="empty-notes">Generate a melody to see notes here</span>
+          </div>
+          <div class="info-bar" id="infoBar" style="display:none"></div>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="section-label">Model architecture</div>
-        <div class="col" id="modelList">
-          <button class="option-btn active" data-group="model" data-val="LSTM">
-            <div class="opt-title">LSTM</div>
-            <div class="opt-sub">2×LSTM(256) → Dense → Softmax</div>
-          </button>
-          <button class="option-btn" data-group="model" data-val="GRU">
-            <div class="opt-title">GRU</div>
-            <div class="opt-sub">2×GRU(256) → Dense — faster training</div>
-          </button>
-          <button class="option-btn" data-group="model" data-val="GAN">
-            <div class="opt-title">GAN</div>
-            <div class="opt-sub">Generator + Discriminator (512)</div>
-          </button>
-          <button class="option-btn" data-group="model" data-val="Transformer">
-            <div class="opt-title">Transformer</div>
-            <div class="opt-sub">8-head attention · global structure</div>
-          </button>
-          <button class="option-btn" data-group="model" data-val="Seq2Seq">
-            <div class="opt-title">Seq2Seq</div>
-            <div class="opt-sub">Encoder-decoder · phrase generation</div>
-          </button>
-        </div>
-      </div>
+      </section>
     </div>
 
-    <div class="grid-4" style="margin-bottom:10px">
-      <div class="stat"><div class="stat-label">Epoch</div><div class="stat-val" id="tEpoch">0 / 50</div></div>
-      <div class="stat"><div class="stat-label">Loss</div><div class="stat-val accent" id="tLoss">—</div></div>
-      <div class="stat"><div class="stat-label">Accuracy</div><div class="stat-val green" id="tAcc">—</div></div>
-      <div class="stat"><div class="stat-label">Status</div><div class="stat-val" id="tStatus">Idle</div></div>
-    </div>
-
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#9090B0;margin-bottom:6px">
-        <span>Training progress</span><span id="tPct">0%</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-fill" id="tBar" style="width:0%"></div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="section-label" style="margin-bottom:0">Training metrics</div>
-        <div style="display:flex;gap:12px;font-size:11px;color:#9090B0">
-          <span style="display:flex;align-items:center;gap:4px">
-            <span style="width:14px;height:2px;background:#6C63FF;display:inline-block;border-radius:1px"></span> Loss
-          </span>
-          <span style="display:flex;align-items:center;gap:4px">
-            <span style="width:14px;height:2px;background:#10B981;display:inline-block;border-radius:1px"></span> Accuracy
-          </span>
-        </div>
-      </div>
-      <canvas id="trainCanvas" width="740" height="110"></canvas>
-    </div>
-
-    <div class="grid-2" style="gap:8px;margin-bottom:10px">
-      <button class="btn btn-primary" id="btnTrain">
-        <span class="btn-icon">🧠</span> <span id="trainLabel">Start training</span>
-      </button>
-      <button class="btn btn-ghost" id="btnPause" disabled>
-        <span class="btn-icon">⏸</span> Pause
-      </button>
-    </div>
-
-    <div id="trainSuccess" style="display:none" class="banner-success">
-      <div class="blink"></div>
-      <div>
-        <div style="font-weight:600;margin-bottom:2px">Model trained successfully</div>
-        <div style="font-size:12px;opacity:0.8">Switch to Generate to compose new melodies</div>
-      </div>
-      <button id="btnSuccessGo" style="margin-left:auto;padding:6px 14px;border-radius:8px;background:#059669;color:#fff;font-size:12px;font-weight:500;border:none;cursor:pointer">
-        Generate →
-      </button>
-    </div>
-  </div>
-
-  <div id="tab-explore" style="display:none">
-    <div class="card" style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <div class="section-label" style="margin-bottom:0">Scale visualizer — <span id="scaleTitle">C major</span></div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap" id="scalePills">
-          <button class="genre-pill active" data-scale="major" style="--gc:#6C63FF;--gs:rgba(108,99,255,0.3);font-size:11px;padding:4px 10px">major</button>
-          <button class="genre-pill" data-scale="minor" style="font-size:11px;padding:4px 10px">minor</button>
-          <button class="genre-pill" data-scale="pentatonic" style="font-size:11px;padding:4px 10px">pentatonic</button>
-          <button class="genre-pill" data-scale="blues" style="font-size:11px;padding:4px 10px">blues</button>
-          <button class="genre-pill" data-scale="dorian" style="font-size:11px;padding:4px 10px">dorian</button>
-        </div>
-      </div>
-      <div id="scaleNotes" style="display:flex;gap:7px;flex-wrap:wrap"></div>
-    </div>
-
-    <div class="card" style="margin-bottom:10px">
-      <div class="section-label">Genre characteristics</div>
-      <div class="col" id="genreChart"></div>
-      <div style="font-size:10px;color:#BEBEE0;margin-top:8px">Bar width = harmonic complexity</div>
-    </div>
-
-    <div class="card">
-      <div class="section-label">How Cadenza works</div>
-      <div class="col">
-        <div class="how-item">
-          <div class="how-icon" style="background:rgba(108,99,255,0.08)">🎲</div>
+    <div id="tab-train" style="display:none">
+      <section class="stage-card utility-card">
+        <div class="stage-head">
           <div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:3px">Markov chain melody generation</div>
-            <div style="font-size:12px;color:#7B7B9D;line-height:1.5">Notes are chosen using weighted step transitions — next notes prefer stepwise motion (step up/down) over large leaps, mimicking how real melodies move.</div>
+            <div class="eyebrow">Training Lab</div>
+            <h1>Simulate model training</h1>
+          </div>
+          <div class="grid-4">
+            <div class="stat"><div class="stat-label">Epoch</div><div class="stat-val" id="tEpoch">0 / 50</div></div>
+            <div class="stat"><div class="stat-label">Loss</div><div class="stat-val accent" id="tLoss">-</div></div>
+            <div class="stat"><div class="stat-label">Accuracy</div><div class="stat-val green" id="tAcc">-</div></div>
+            <div class="stat"><div class="stat-label">Status</div><div class="stat-val" id="tStatus">Idle</div></div>
           </div>
         </div>
-        <div class="divider"></div>
-        <div class="how-item">
-          <div class="how-icon" style="background:rgba(16,185,129,0.08)">🌡</div>
-          <div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:3px">Temperature sampling</div>
-            <div style="font-size:12px;color:#7B7B9D;line-height:1.5">Low temperature = structured, predictable melodies following scale rules closely. High = more random and experimental choices, producing surprising intervals.</div>
+        <div class="train-layout">
+          <div class="glass-panel">
+            <div class="panel-kicker">Training Dataset</div>
+            <div class="col" id="datasetList">
+              <button class="option-btn active" data-group="dataset" data-val="Classical MIDI"><span>Classical MIDI</span><small>Bach, Mozart, Beethoven</small></button>
+              <button class="option-btn" data-group="dataset" data-val="Jazz Standards"><span>Jazz Standards</span><small>Chord-rich progressions</small></button>
+              <button class="option-btn" data-group="dataset" data-val="Bach Chorales"><span>Bach Chorales</span><small>4-part harmony</small></button>
+              <button class="option-btn" data-group="dataset" data-val="Pop / Rock"><span>Pop / Rock</span><small>Hook-driven melody</small></button>
+              <button class="option-btn" data-group="dataset" data-val="Folk & Celtic"><span>Folk & Celtic</span><small>Modal, pentatonic</small></button>
+            </div>
+          </div>
+          <div class="glass-panel">
+            <div class="panel-kicker">Model Architecture</div>
+            <div class="col" id="modelList">
+              <button class="option-btn active" data-group="model" data-val="LSTM"><span>LSTM</span><small>2xLSTM to Dense</small></button>
+              <button class="option-btn" data-group="model" data-val="GRU"><span>GRU</span><small>Faster training</small></button>
+              <button class="option-btn" data-group="model" data-val="GAN"><span>GAN</span><small>Generator + discriminator</small></button>
+              <button class="option-btn" data-group="model" data-val="Transformer"><span>Transformer</span><small>Global structure</small></button>
+              <button class="option-btn" data-group="model" data-val="Seq2Seq"><span>Seq2Seq</span><small>Phrase generation</small></button>
+            </div>
           </div>
         </div>
-        <div class="divider"></div>
-        <div class="how-item">
-          <div class="how-icon" style="background:rgba(249,115,22,0.08)">🔊</div>
-          <div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:3px">Web Audio synthesis</div>
-            <div style="font-size:12px;color:#7B7B9D;line-height:1.5">Each note plays as a triangle-wave oscillator through a lowpass filter with a custom ADSR envelope — warm attack, natural decay. All done in the browser, zero plugins.</div>
-          </div>
+        <div class="train-chart-card">
+          <div class="progress-line"><span>Training progress</span><span id="tPct">0%</span></div>
+          <div class="progress-track"><div class="progress-fill" id="tBar" style="width:0%"></div></div>
+          <canvas id="trainCanvas" width="1000" height="180"></canvas>
         </div>
-        <div class="divider"></div>
-        <div class="how-item">
-          <div class="how-icon" style="background:rgba(236,72,153,0.08)">📁</div>
-          <div>
-            <div style="font-size:13px;font-weight:600;margin-bottom:3px">Real MIDI export</div>
-            <div style="font-size:12px;color:#7B7B9D;line-height:1.5">Downloads a genuine binary .mid file with proper headers, variable-length delta-time encoding, and note-on/note-off events. Importable into GarageBand, Ableton, FL Studio.</div>
-          </div>
+        <div class="train-actions">
+          <button class="btn btn-primary" id="btnTrain"><span id="trainLabel">Start training</span></button>
+          <button class="btn btn-ghost" id="btnPause" disabled>Pause</button>
         </div>
-      </div>
+        <div id="trainSuccess" style="display:none" class="banner-success">
+          <div><strong>Model trained successfully</strong><span>Switch to Generate to compose new melodies</span></div>
+          <button id="btnSuccessGo" class="text-button">Generate</button>
+        </div>
+      </section>
     </div>
-  </div>
 
-  <div class="glass" style="margin-top:1.25rem;padding:12px 16px;border-radius:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div class="section-label" style="margin-bottom:0">Console</div>
-      <button id="btnClearLog" style="font-size:11px;color:#BEBEE0;background:none;border:none;cursor:pointer">Clear</button>
+    <div id="tab-explore" style="display:none">
+      <section class="stage-card utility-card">
+        <div class="stage-head">
+          <div>
+            <div class="eyebrow">Explore</div>
+            <h1>Scale and genre map</h1>
+          </div>
+        </div>
+        <div class="explore-grid">
+          <div class="glass-panel">
+            <div class="panel-head">
+              <span class="panel-kicker">Scale Visualizer - <span id="scaleTitle">C major</span></span>
+            </div>
+            <div id="scalePills" class="scale-pills">
+              <button class="genre-pill active" data-scale="major">major</button>
+              <button class="genre-pill" data-scale="minor">minor</button>
+              <button class="genre-pill" data-scale="pentatonic">pentatonic</button>
+              <button class="genre-pill" data-scale="blues">blues</button>
+              <button class="genre-pill" data-scale="dorian">dorian</button>
+            </div>
+            <div id="scaleNotes" class="scale-notes"></div>
+          </div>
+          <div class="glass-panel">
+            <div class="panel-kicker">Genre Characteristics</div>
+            <div class="col" id="genreChart"></div>
+          </div>
+        </div>
+      </section>
     </div>
-    <div class="console" id="console">
-      <div class="log-line"><span class="log-t"></span><span class="log-info">Cadenza ready — generate a melody or start training.</span></div>
-    </div>
-  </div>
-
-</div>
+  </section>
+</main>
 
 <script src="script.js"></script>
 </body>
