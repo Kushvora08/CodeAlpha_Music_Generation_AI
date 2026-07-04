@@ -14,6 +14,30 @@ const GENRE_CFG = {
   Blues:    { tempo:96,  oct:[3,5], durations:[0.25,0.5,0.5,1,1],    dynamics:0.82, preferredScale:"blues",      complexity:0.7, color:"#8B5CF6" },
   Celtic:   { tempo:140, oct:[4,5], durations:[0.25,0.5,0.5,1],      dynamics:0.73, preferredScale:"major",      complexity:0.4, color:"#0EA5E9" },
 };
+const GENRE_RHYTHMS = {
+  Classical:[[1,1,0.5,0.5],[0.5,0.5,1,1],[1,0.5,0.5,2],[0.5,1,0.5,1]],
+  Jazz:[[0.5,0.5,0.75,0.25],[0.25,0.5,0.25,1],[0.75,0.25,0.5,0.5],[0.5,1,0.25,0.25]],
+  Ambient:[[2,1,1.5,2],[1.5,2,1,3],[2,2,1,1.5],[1,3,2,2]],
+  Blues:[[0.5,0.5,1,0.5],[0.25,0.5,0.25,1],[1,0.5,0.5,1],[0.5,1,0.5,0.5]],
+  Celtic:[[0.5,0.5,0.25,0.25],[0.25,0.25,0.5,0.5],[0.5,0.25,0.25,1],[0.25,0.5,0.25,0.5]],
+};
+const GENRE_PROFILES = {
+  Classical:{home:0.72, repeat:0.10, leap:0.10, turn:0.55, octaveRestless:0.12},
+  Jazz:{home:0.55, repeat:0.14, leap:0.22, turn:0.40, octaveRestless:0.20},
+  Ambient:{home:0.82, repeat:0.28, leap:0.05, turn:0.78, octaveRestless:0.08},
+  Blues:{home:0.64, repeat:0.18, leap:0.16, turn:0.52, octaveRestless:0.16},
+  Celtic:{home:0.70, repeat:0.08, leap:0.12, turn:0.62, octaveRestless:0.10},
+};
+const SAMPLE_ARPEGGIO = [
+  {step:0, hold:2},
+  {step:2, hold:1.75},
+  {step:4, hold:0.25},
+  {step:7, hold:0.25},
+  {step:9, hold:0.25},
+  {step:4, hold:0.25},
+  {step:7, hold:0.25},
+  {step:9, hold:0.25},
+];
 
 /* ═══════════════════════════════════════════════════════
    STATE
@@ -24,41 +48,122 @@ let audioCtx = null;
 let trainTimer = null, isTraining = false;
 let lossHist = [], accHist = [];
 let wavePhase = 0, waveAmp = 0, waveRAF = null;
+let bgPhase = 0, bgRAF = null;
 let exploreScale = "major";
 
 /* ═══════════════════════════════════════════════════════
    SEEDED RNG
 ═══════════════════════════════════════════════════════ */
 function rng(s){ s=(s*1664525+1013904223)&0xffffffff; return [(s>>>0)/4294967296, s]; }
+function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+function nextRand(state){ let r; [r,state.seed]=rng(state.seed); return r; }
+function weightedChoice(items,weights,state){
+  const total=weights.reduce((sum,w)=>sum+w,0);
+  let r=nextRand(state)*total;
+  for(let i=0;i<items.length;i++){
+    r-=weights[i];
+    if(r<=0) return items[i];
+  }
+  return items[items.length-1];
+}
 
 /* ═══════════════════════════════════════════════════════
    GENERATE MELODY
 ═══════════════════════════════════════════════════════ */
-function generateSequence(genre,key,scale,n,seed,temp){
-  const cfg = GENRE_CFG[genre];
+function generatePhraseSequence(genre,key,scale,n,seed,temp){
+  const cfg = GENRE_CFG[genre]||GENRE_CFG.Classical;
+  const profile = GENRE_PROFILES[genre]||GENRE_PROFILES.Classical;
   const intervals = SCALES[scale]||SCALES[cfg.preferredScale];
   const keyIdx = NOTES.indexOf(key);
   const [minO,maxO] = cfg.oct;
-  const steps=[0,1,2,-1,-2,3,-3];
-  const wts  =[0.30,0.22,0.16,0.14,0.10,0.05,0.03];
-  let s = seed*999983+7, prevI=0, notes=[];
-  for(let i=0;i<n;i++){
-    let r,v; [r,s]=rng(s);
-    let ni;
-    if(i===0||r<temp){ [v,s]=rng(s); ni=Math.floor(v*intervals.length); }
-    else{
-      [v,s]=rng(s); let cum=0; ni=prevI;
-      for(let j=0;j<steps.length;j++){
-        cum+=wts[j];
-        if(v<cum){ ni=(prevI+steps[j]+intervals.length*8)%intervals.length; break; }
-      }
+  const scaleLen = intervals.length;
+  const octaveCount = maxO-minO+1;
+  const maxAbs = scaleLen*octaveCount-1;
+  const state = {seed: seed*999983+7};
+  const stableDegrees = [0,Math.min(2,scaleLen-1),Math.min(4,scaleLen-1)].filter((v,i,a)=>a.indexOf(v)===i);
+  const rhythmBank = GENRE_RHYTHMS[genre]||[cfg.durations];
+  const phraseLen = n<=8 ? Math.max(2,n) : 4;
+  const rhythmOffset = Math.floor(nextRand(state)*rhythmBank.length);
+  let direction = nextRand(state)<0.5 ? 1 : -1;
+  let prevMove = 0;
+  let repeated = 0;
+  let notes=[];
+
+  function nearestAbs(degree,targetAbs){
+    let best=degree, bestDist=Infinity;
+    for(let o=0;o<octaveCount;o++){
+      const candidate=o*scaleLen+degree;
+      const dist=Math.abs(candidate-targetAbs);
+      if(dist<bestDist){ best=candidate; bestDist=dist; }
     }
-    prevI=ni;
+    return clamp(best,0,maxAbs);
+  }
+  function chooseCadenceDegree(isFinal,phraseIndex){
+    if(isFinal) return 0;
+    const weights=genre==='Jazz'?[0.30,0.42,0.28]:genre==='Blues'?[0.42,0.20,0.38]:[0.45,0.25,0.30];
+    if(phraseIndex%2===1 && stableDegrees.includes(Math.min(4,scaleLen-1))) return Math.min(4,scaleLen-1);
+    return weightedChoice(stableDegrees,weights.slice(0,stableDegrees.length),state);
+  }
+  function chooseMove(posInPhrase){
+    const restless=clamp(temp,0.05,0.95);
+    if(Math.abs(prevMove)>=3){
+      direction = prevMove>0 ? -1 : 1;
+      return direction;
+    }
+    if(posInPhrase===2 && nextRand(state)<profile.turn) direction*=-1;
+    const moves=[0,direction,-direction,2*direction,-2*direction,3*direction,-3*direction];
+    const weights=[
+      profile.repeat+(1-restless)*0.12,
+      0.34+(1-restless)*0.24,
+      0.20+(1-restless)*0.10,
+      0.12+restless*0.10,
+      0.08+restless*0.08,
+      profile.leap*restless,
+      profile.leap*restless*0.65
+    ];
+    if(repeated>=1) weights[0]=0.01;
+    return weightedChoice(moves,weights,state);
+  }
+
+  let prevAbs = nearestAbs(weightedChoice(stableDegrees,[0.58,0.26,0.16].slice(0,stableDegrees.length),state),Math.floor(maxAbs/2));
+  for(let i=0;i<n;i++){
+    const pos=i%phraseLen;
+    const phraseIndex=Math.floor(i/phraseLen);
+    const phraseStart=pos===0;
+    const phraseEnd=pos===phraseLen-1||i===n-1;
+    const finalNote=i===n-1;
+    let abs;
+
+    if(i===0){
+      abs=prevAbs;
+    }else if(phraseEnd){
+      const cadenceDegree=chooseCadenceDegree(finalNote,phraseIndex);
+      abs=nearestAbs(cadenceDegree,prevAbs+(finalNote?0:direction));
+    }else{
+      if(phraseStart && nextRand(state)<profile.home){
+        const anchor=weightedChoice(stableDegrees,[0.50,0.25,0.25].slice(0,stableDegrees.length),state);
+        abs=nearestAbs(anchor,prevAbs);
+      }else{
+        abs=prevAbs+chooseMove(pos);
+      }
+      if(abs<=1){ direction=1; abs=Math.max(abs,0); }
+      if(abs>=maxAbs-1){ direction=-1; abs=Math.min(abs,maxAbs); }
+      abs=clamp(abs,0,maxAbs);
+    }
+
+    const ni=abs%scaleLen;
+    const oct=minO+Math.floor(abs/scaleLen);
     const semi=(keyIdx+intervals[ni])%12;
-    let ov; [ov,s]=rng(s); const oct=minO+Math.floor(ov*(maxO-minO+1));
-    let dv; [dv,s]=rng(s); const dur=cfg.durations[Math.floor(dv*cfg.durations.length)];
-    let vv; [vv,s]=rng(s); const vel=Math.max(0.4,Math.min(1,cfg.dynamics+(vv-0.5)*0.35));
-    notes.push({note:NOTES[semi],oct,semi,dur,vel,ni});
+    const pattern=rhythmBank[(rhythmOffset+phraseIndex)%rhythmBank.length];
+    let dur=pattern[pos%pattern.length];
+    if(temp>0.68 && !phraseEnd && nextRand(state)<0.18) dur=cfg.durations[Math.floor(nextRand(state)*cfg.durations.length)];
+    if(phraseEnd) dur=Math.max(dur,genre==='Ambient'?2:1);
+    const accent=phraseStart?0.08:phraseEnd?-0.04:0;
+    const vel=clamp(cfg.dynamics+accent+(nextRand(state)-0.5)*(0.16+temp*0.16),0.35,1);
+    notes.push({note:NOTES[semi],oct,semi,dur,vel,ni,phrase:phraseIndex,cadence:phraseEnd});
+    repeated=abs===prevAbs ? repeated+1 : 0;
+    prevMove=abs-prevAbs;
+    prevAbs=abs;
   }
   return notes;
 }
@@ -66,6 +171,52 @@ function generateSequence(genre,key,scale,n,seed,temp){
 /* ═══════════════════════════════════════════════════════
    FREQUENCY SPEC
 ═══════════════════════════════════════════════════════ */
+function sampleProgression(scaleLen,scale){
+  if(scaleLen>=7){
+    if(scale==='minor') return [0,0,3,3,4,4,5,2,0,4,0];
+    if(scale==='dorian') return [0,0,1,1,4,4,5,3,0,4,0];
+    if(scale==='mixolydian') return [0,0,1,1,4,4,5,3,0,4,0];
+    return [0,0,1,1,4,4,5,3,0,4,0];
+  }
+  return [0,0,1,1,Math.min(3,scaleLen-1),Math.min(3,scaleLen-1),Math.min(4,scaleLen-1),2%scaleLen,0];
+}
+
+function generateSequence(genre,key,scale,n,seed,temp){
+  const cfg = GENRE_CFG[genre]||GENRE_CFG.Classical;
+  const intervals = SCALES[scale]||SCALES[cfg.preferredScale];
+  const keyIdx = NOTES.indexOf(key);
+  const [minO,maxO] = cfg.oct;
+  const scaleLen = intervals.length;
+  const state = {seed: seed*999983+7};
+  const progression = sampleProgression(scaleLen,scale);
+  const stepDur = genre==='Ambient' ? 0.5 : 0.25;
+  let notes=[];
+
+  for(let i=0;i<n;i++){
+    const cellIdx=Math.floor(i/SAMPLE_ARPEGGIO.length);
+    const pos=i%SAMPLE_ARPEGGIO.length;
+    const cell=SAMPLE_ARPEGGIO[pos];
+    let root=progression[cellIdx%progression.length]%scaleLen;
+    if(temp>0.72 && pos>1 && nextRand(state)<0.12){
+      root=(root+(nextRand(state)<0.5?-1:1)+scaleLen)%scaleLen;
+    }
+    let abs=root+cell.step;
+    if(i===n-1) abs=0;
+    const ni=((abs%scaleLen)+scaleLen)%scaleLen;
+    const octaveLift=Math.floor(abs/scaleLen);
+    const oct=clamp(minO+octaveLift,minO,maxO);
+    const semi=(keyIdx+intervals[ni])%12;
+    const finalNote=i===n-1;
+    const hold=finalNote ? Math.max(1,cell.hold||stepDur) : cell.hold||stepDur;
+    const phrase=cellIdx;
+    const cadence=pos===SAMPLE_ARPEGGIO.length-1||finalNote;
+    const bassAccent=pos<2?0.08:0;
+    const vel=clamp(cfg.dynamics+bassAccent+(nextRand(state)-0.5)*(0.10+temp*0.10),0.35,1);
+    notes.push({note:NOTES[semi],oct,semi,dur:stepDur,hold,vel,ni,phrase,cadence});
+  }
+  return notes;
+}
+
 function noteFreq(note,oct){ return 440*Math.pow(2,(NOTES.indexOf(note)-9+(oct-4)*12)/12); }
 
 /* ═══════════════════════════════════════════════════════
@@ -80,6 +231,76 @@ function getCtx(){
 /* ═══════════════════════════════════════════════════════
    WAVEFORM CANVAS
 ═══════════════════════════════════════════════════════ */
+function startBackground(){
+  cancelAnimationFrame(bgRAF);
+  const cv=document.getElementById('bgCanvas');
+  if(!cv) return;
+  const cx=cv.getContext('2d');
+  function size(){
+    const dpr=window.devicePixelRatio||1;
+    cv.width=Math.floor(innerWidth*dpr);
+    cv.height=Math.floor(innerHeight*dpr);
+    cv.style.width=innerWidth+'px';
+    cv.style.height=innerHeight+'px';
+    cx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  size();
+  window.addEventListener('resize',size);
+  function draw(){
+    const W=innerWidth, H=innerHeight;
+    bgPhase+=0.004;
+    cx.clearRect(0,0,W,H);
+    const sky=cx.createLinearGradient(0,0,W,H);
+    sky.addColorStop(0,'rgba(4,8,12,0.96)');
+    sky.addColorStop(0.5,'rgba(6,21,24,0.88)');
+    sky.addColorStop(1,'rgba(14,10,7,0.95)');
+    cx.fillStyle=sky; cx.fillRect(0,0,W,H);
+
+    for(let r=0;r<4;r++){
+      cx.save();
+      cx.translate(W*0.66,H*0.33);
+      cx.rotate(bgPhase*(r%2?-1:1)+r*0.35);
+      cx.strokeStyle=r%2?'rgba(246,216,155,0.11)':'rgba(98,244,230,0.12)';
+      cx.lineWidth=1.1+r*0.35;
+      cx.beginPath();
+      cx.ellipse(0,0,W*(0.20+r*0.08),H*(0.14+r*0.05),0,0,Math.PI*2);
+      cx.stroke();
+      cx.restore();
+    }
+
+    for(let layer=0;layer<3;layer++){
+      const yBase=H*(0.28+layer*0.16);
+      const amp=26+layer*18;
+      cx.strokeStyle=layer===1?'rgba(246,216,155,0.14)':'rgba(98,244,230,0.13)';
+      cx.lineWidth=1.1;
+      cx.beginPath();
+      for(let x=0;x<=W;x+=8){
+        const t=x/W;
+        const y=yBase+Math.sin(t*Math.PI*4+bgPhase*70+layer)*amp+Math.sin(t*Math.PI*13-bgPhase*40)*amp*0.18;
+        x===0?cx.moveTo(x,y):cx.lineTo(x,y);
+      }
+      cx.stroke();
+    }
+
+    cx.fillStyle='rgba(246,216,155,0.16)';
+    for(let i=0;i<70;i++){
+      const x=((i*97+bgPhase*9000)%W);
+      const h=8+((i*37)%72);
+      const y=H*0.58-h/2+Math.sin(i+bgPhase*18)*24;
+      cx.fillRect(x,y,1,h);
+    }
+    cx.fillStyle='rgba(98,244,230,0.16)';
+    for(let i=0;i<60;i++){
+      const x=((i*71-bgPhase*7600)%W+W)%W;
+      const h=6+((i*43)%62);
+      const y=H*0.48-h/2+Math.cos(i+bgPhase*14)*22;
+      cx.fillRect(x,y,1,h);
+    }
+    bgRAF=requestAnimationFrame(draw);
+  }
+  draw();
+}
+
 function startWave(color){
   cancelAnimationFrame(waveRAF);
   const cv=document.getElementById('waveCanvas');
@@ -87,42 +308,56 @@ function startWave(color){
   const W=cv.width, H=cv.height;
   function draw(){
     cx.clearRect(0,0,W,H);
-    wavePhase+=0.055;
-    const amp=(H/2-6)*waveAmp*0.88;
-    /* glow */
-    cx.shadowColor=color||'#6C63FF'; cx.shadowBlur=isPlaying?12:0;
-    cx.strokeStyle=color||'#6C63FF'; cx.lineWidth=2.2;
-    cx.beginPath();
-    for(let x=0;x<W;x++){
-      const t=x/W;
-      const y=H/2+amp*(0.55*Math.sin(2*Math.PI*t*4+wavePhase)+0.28*Math.sin(2*Math.PI*t*9+wavePhase*1.4)+0.17*Math.sin(2*Math.PI*t*16+wavePhase*0.6));
-      x===0?cx.moveTo(x,y):cx.lineTo(x,y);
-    }
-    cx.stroke();
-    /* ghost */
-    cx.shadowBlur=0; cx.strokeStyle=(color||'#6C63FF')+'30'; cx.lineWidth=1;
-    cx.beginPath();
-    for(let x=0;x<W;x++){
-      const t=x/W;
-      const y=H/2-amp*0.38*(0.6*Math.sin(2*Math.PI*t*3+wavePhase*0.8)+0.4*Math.sin(2*Math.PI*t*7+wavePhase*1.1));
-      x===0?cx.moveTo(x,y):cx.lineTo(x,y);
-    }
-    cx.stroke();
+    wavePhase+=0.045;
+    drawOpalWave(cx,W,H,Math.max(waveAmp,0.28),wavePhase,isPlaying);
     if(isPlaying) waveRAF=requestAnimationFrame(draw);
   }
   waveRAF=requestAnimationFrame(draw);
 }
 
+function drawOpalWave(cx,W,H,ampMul,phase,glow){
+  const mid=H*0.5;
+  const amp=(H*0.34)*ampMul;
+  const palette=['rgba(98,244,230,0.88)','rgba(246,216,155,0.82)','rgba(106,183,255,0.62)'];
+  cx.save();
+  cx.globalCompositeOperation='lighter';
+  for(let layer=0;layer<9;layer++){
+    const p=phase+layer*0.18;
+    cx.beginPath();
+    for(let x=0;x<=W;x+=4){
+      const t=x/W;
+      const envelope=Math.sin(Math.PI*t);
+      const y=mid+
+        envelope*amp*(0.58*Math.sin(Math.PI*2*(t*(2.7+layer*0.14))+p)+
+        0.28*Math.sin(Math.PI*2*(t*(6.5+layer*0.08))-p*1.25)+
+        0.14*Math.sin(Math.PI*2*(t*13)+p*0.7));
+      x===0?cx.moveTo(x,y):cx.lineTo(x,y);
+    }
+    cx.shadowColor=layer%2?'rgba(246,216,155,0.5)':'rgba(98,244,230,0.5)';
+    cx.shadowBlur=glow?18:8;
+    cx.strokeStyle=palette[layer%palette.length];
+    cx.globalAlpha=0.23+layer*0.045;
+    cx.lineWidth=1+layer*0.18;
+    cx.stroke();
+  }
+  cx.globalAlpha=0.8;
+  cx.shadowBlur=16;
+  cx.strokeStyle='rgba(250,246,226,0.76)';
+  cx.lineWidth=1.1;
+  cx.beginPath();
+  cx.moveTo(0,mid);
+  cx.lineTo(W,mid);
+  cx.stroke();
+  cx.restore();
+}
+
 function stopWave(){
   cancelAnimationFrame(waveRAF); waveAmp=0;
   const cv=document.getElementById('waveCanvas');
-  const cx=cv.getContext('2d');
   if(!cv) return;
+  const cx=cv.getContext('2d');
   cx.clearRect(0,0,cv.width,cv.height);
-  cx.shadowBlur=0; cx.strokeStyle='rgba(108,99,255,0.15)'; cx.lineWidth=0.8;
-  cx.setLineDash([6,6]);
-  cx.beginPath(); cx.moveTo(0,cv.height/2); cx.lineTo(cv.width,cv.height/2); cx.stroke();
-  cx.setLineDash([]);
+  drawOpalWave(cx,cv.width,cv.height,0.28,wavePhase,false);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -133,7 +368,25 @@ function drawRoll(active){
   const cx=cv.getContext('2d');
   const W=cv.width, H=cv.height;
   cx.clearRect(0,0,W,H);
-  if(!melody.length) return;
+  cx.fillStyle='rgba(4,10,14,0.86)';
+  cx.fillRect(0,0,W,H);
+  for(let x=0;x<W;x+=48){
+    cx.strokeStyle=x%192===0?'rgba(246,216,155,0.15)':'rgba(197,229,232,0.08)';
+    cx.lineWidth=1;
+    cx.beginPath(); cx.moveTo(x,0); cx.lineTo(x,H); cx.stroke();
+  }
+  for(let y=0;y<H;y+=13){
+    cx.strokeStyle='rgba(197,229,232,0.075)';
+    cx.lineWidth=0.6;
+    cx.beginPath(); cx.moveTo(0,y); cx.lineTo(W,y); cx.stroke();
+  }
+  if(!melody.length){
+    cx.fillStyle='rgba(200,213,216,0.55)';
+    cx.font='13px Inter, sans-serif';
+    cx.textAlign='center';
+    cx.fillText('Generate a melody to reveal the opal piano roll',W/2,H/2+4);
+    return;
+  }
   const vis=melody.slice(0,40);
   const semis=vis.map(n=>n.semi+n.oct*12);
   const minS=Math.min(...semis)-1, maxS=Math.max(...semis)+1;
@@ -143,24 +396,26 @@ function drawRoll(active){
   /* grid */
   for(let i=0;i<range;i++){
     const s=maxS-i;
-    if(NOTES[s%12]?.includes('#')){ cx.fillStyle='rgba(108,99,255,0.04)'; cx.fillRect(0,i*cellH,W,cellH); }
-    cx.strokeStyle='rgba(200,195,255,0.3)'; cx.lineWidth=0.4;
+    if(NOTES[s%12]?.includes('#')){ cx.fillStyle='rgba(98,244,230,0.035)'; cx.fillRect(0,i*cellH,W,cellH); }
+    cx.strokeStyle='rgba(197,229,232,0.1)'; cx.lineWidth=0.4;
     cx.beginPath(); cx.moveTo(0,i*cellH); cx.lineTo(W,i*cellH); cx.stroke();
   }
   /* notes */
   vis.forEach((n,i)=>{
     const s=n.semi+n.oct*12;
     const top=(maxS-s)*cellH, left=i*cellW+1;
-    const w=Math.max(14,n.dur*cellW)-2;
+    const w=Math.max(14,(n.hold||n.dur)*cellW)-2;
     const isAct=i===active;
     const alpha=0.2+n.vel*0.6;
-    cx.shadowBlur=isAct?10:0; cx.shadowColor='rgba(108,99,255,0.5)';
-    cx.fillStyle=isAct?'#6C63FF':`rgba(108,99,255,${alpha})`;
+    cx.shadowBlur=isAct?16:4; cx.shadowColor=isAct?'rgba(246,216,155,0.7)':'rgba(98,244,230,0.28)';
+    const grad=cx.createLinearGradient(left,top,left+w,top+cellH);
+    grad.addColorStop(0,isAct?'rgba(246,216,155,0.98)':`rgba(98,244,230,${alpha})`);
+    grad.addColorStop(1,isAct?'rgba(98,244,230,0.98)':`rgba(106,183,255,${alpha*0.8})`);
+    cx.fillStyle=grad;
     cx.beginPath();
     cx.roundRect?cx.roundRect(left,top+1,w,cellH-2,3):cx.rect(left,top+1,w,cellH-2);
     cx.fill(); cx.shadowBlur=0;
   });
-  cv.width=Math.max(760,vis.length*cellW+10);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -181,7 +436,7 @@ function renderNoteGrid(active){
 ═══════════════════════════════════════════════════════ */
 async function handleGenerate(){
   const btn=document.getElementById('btnGenerate');
-  btn.disabled=true; btn.innerHTML='<span class="btn-icon spin">⟳</span> Generating…';
+  btn.disabled=true; btn.innerHTML='<span class="btn-icon spin">⟳</span> Generating';
   setStatus('Generating…','orange');
   addLog('Generating melody…','info');
   await delay(400);
@@ -205,7 +460,7 @@ async function handleGenerate(){
     <span>Creativity: <b>${temp.toFixed(2)}</b></span>`;
   document.getElementById('btnPlay').disabled=false;
   document.getElementById('btnExport').disabled=false;
-  btn.disabled=false; btn.innerHTML='<span class="btn-icon">✨</span> Generate melody';
+  btn.disabled=false; btn.innerHTML='Generate';
   setStatus('Ready','green');
   addLog(`Generated ${melody.length} notes — ${currentGenre}, ${key} ${scale}, temp=${temp.toFixed(2)}`,'ok');
 }
@@ -214,53 +469,61 @@ async function handlePlay(){
   if(isPlaying){ stopFlag=true; return; }
   if(!melody.length){ addLog('Generate a melody first','warn'); return; }
   stopFlag=false; isPlaying=true;
-  document.getElementById('btnPlay').innerHTML='<span class="btn-icon">⏹</span> Stop';
+  document.getElementById('btnPlay').innerHTML='<span class="btn-icon" id="playIcon">⏹</span><span id="playLabel">Stop</span>';
   document.getElementById('btnPlay').className='btn btn-danger';
   document.getElementById('btnGenerate').disabled=true;
   document.getElementById('statusDot').style.visibility='visible';
-  setStatus('Playing…','accent');
+  setStatus('Looping...','accent');
   const ctx=getCtx();
   const tempo=parseInt(document.getElementById('rTempo').value);
   const vol=parseInt(document.getElementById('rVol').value)/100;
   const beatSec=60/tempo;
   const color=GENRE_CFG[currentGenre].color;
+  const activeOscs=new Set();
   waveAmp=0.5; startWave(color);
-  addLog(`Playing ${melody.length} notes at ${tempo} BPM`,'ok');
+  addLog(`Looping ${melody.length} notes at ${tempo} BPM. Press Stop to end.`,'ok');
 
-  for(let i=0;i<melody.length;i++){
-    if(stopFlag) break;
-    const n=melody[i];
-    activeIdx=i;
-    waveAmp=n.vel;
-    renderNoteGrid(i); drawRoll(i);
-    document.getElementById('noteCounter').textContent=`Note ${i+1} / ${melody.length}`;
-    const chip=document.getElementById('nc'+i);
-    if(chip) chip.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
-    const dur=n.dur*beatSec;
-    const freq=noteFreq(n.note,n.oct);
-    const osc=ctx.createOscillator();
-    const gain=ctx.createGain();
-    const filt=ctx.createBiquadFilter();
-    filt.type='lowpass'; filt.frequency.value=Math.min(4000,800+freq*3); filt.Q.value=0.5;
-    osc.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
-    osc.type='triangle'; osc.frequency.value=freq;
-    const now=ctx.currentTime;
-    gain.gain.setValueAtTime(0,now);
-    gain.gain.linearRampToValueAtTime(n.vel*vol*0.6,now+0.015);
-    gain.gain.setValueAtTime(n.vel*vol*0.4,now+dur*0.65);
-    gain.gain.linearRampToValueAtTime(0.0001,now+dur*0.92);
-    osc.start(now); osc.stop(now+dur);
-    await delay(dur*1000);
+  let loopCount=1;
+  while(!stopFlag){
+    for(let i=0;i<melody.length;i++){
+      if(stopFlag) break;
+      const n=melody[i];
+      activeIdx=i;
+      waveAmp=n.vel;
+      renderNoteGrid(i); drawRoll(i);
+      document.getElementById('noteCounter').textContent=`Loop ${loopCount} - Note ${i+1} / ${melody.length}`;
+      const stepDur=n.dur*beatSec;
+      const holdDur=(n.hold||n.dur)*beatSec;
+      const freq=noteFreq(n.note,n.oct);
+      const osc=ctx.createOscillator();
+      const gain=ctx.createGain();
+      const filt=ctx.createBiquadFilter();
+      filt.type='lowpass'; filt.frequency.value=Math.min(4000,800+freq*3); filt.Q.value=0.5;
+      osc.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+      osc.type='triangle'; osc.frequency.value=freq;
+      const now=ctx.currentTime;
+      gain.gain.setValueAtTime(0,now);
+      gain.gain.linearRampToValueAtTime(n.vel*vol*0.6,now+0.015);
+      gain.gain.setValueAtTime(n.vel*vol*0.4,now+holdDur*0.65);
+      gain.gain.linearRampToValueAtTime(0.0001,now+holdDur*0.92);
+      activeOscs.add(osc);
+      osc.onended=()=>activeOscs.delete(osc);
+      osc.start(now); osc.stop(now+holdDur);
+      await delay(stepDur*1000);
+    }
+    loopCount++;
   }
   isPlaying=false; stopFlag=false; activeIdx=-1;
+  activeOscs.forEach(osc=>{ try{ osc.stop(); }catch(e){} });
+  activeOscs.clear();
   renderNoteGrid(-1); drawRoll(-1); stopWave();
-  document.getElementById('btnPlay').innerHTML='<span class="btn-icon">▶</span> Play';
+  document.getElementById('btnPlay').innerHTML='<span class="btn-icon" id="playIcon">▶</span><span id="playLabel">Play</span>';
   document.getElementById('btnPlay').className='btn btn-ghost';
   document.getElementById('btnGenerate').disabled=false;
   document.getElementById('statusDot').style.visibility='hidden';
   document.getElementById('noteCounter').textContent='';
   setStatus('Ready','green');
-  addLog('playback complete','ok');
+  addLog('Loop stopped','ok');
 }
 
 function handleExport(){
@@ -269,13 +532,29 @@ function handleExport(){
   const uspb=Math.round(60000000/tempo);
   const hdr=[0x4D,0x54,0x68,0x64,0,0,0,6,0,0,0,1,0,96];
   const ev=[0x00,0xFF,0x51,0x03,(uspb>>16)&0xFF,(uspb>>8)&0xFF,uspb&0xFF];
+  const writeVar=(value)=>{
+    let bytes=[value&0x7F];
+    value>>=7;
+    while(value>0){ bytes.unshift((value&0x7F)|0x80); value>>=7; }
+    return bytes;
+  };
+  const events=[];
+  let cursor=0;
   melody.forEach(n=>{
     const midi=NOTES.indexOf(n.note)+(n.oct+1)*12;
-    const ticks=Math.round(n.dur*96);
+    const stepTicks=Math.round(n.dur*96);
+    const holdTicks=Math.max(1,Math.round((n.hold||n.dur)*96));
     const vel=Math.round(n.vel*100);
-    ev.push(0x00,0x90,midi,vel);
-    const dt=ticks<128?[ticks]:[(ticks>>7)|0x80,ticks&0x7F];
-    ev.push(...dt,0x80,midi,0x00);
+    events.push({tick:cursor,type:'on',midi,vel});
+    events.push({tick:cursor+holdTicks,type:'off',midi,vel:0});
+    cursor+=stepTicks;
+  });
+  events.sort((a,b)=>a.tick-b.tick||(a.type==='off'?-1:1));
+  let lastTick=0;
+  events.forEach(e=>{
+    ev.push(...writeVar(e.tick-lastTick));
+    ev.push(e.type==='on'?0x90:0x80,e.midi,e.vel);
+    lastTick=e.tick;
   });
   ev.push(0x00,0xFF,0x2F,0x00);
   const trk=[0x4D,0x54,0x72,0x6B,(ev.length>>24)&0xFF,(ev.length>>16)&0xFF,(ev.length>>8)&0xFF,ev.length&0xFF,...ev];
@@ -423,14 +702,13 @@ function buildGenreChart(){
     const active=g===currentGenre;
     return `<div class="genre-bar-row">
       <div style="width:8px;height:8px;border-radius:50%;background:${c.color};flex-shrink:0"></div>
-      <span style="width:76px;font-size:12px;font-weight:${active?'600':'400'};color:${active?'#1C1C2E':'#7B7B9D'}">${g}</span>
-      <span style="width:56px;font-size:11px;color:#9090B0">${c.tempo} BPM</span>
+      <span style="font-weight:${active?'700':'500'};color:${active?'var(--teal)':'var(--soft)'}">${g}</span>
+      <span>${c.tempo} BPM</span>
       <div class="genre-bar-track">
         <div class="genre-bar-fill" style="width:${c.complexity*100}%;background:${c.color}"></div>
       </div>
-      <span style="width:76px;font-size:11px;color:#9090B0;text-align:right">${c.preferredScale}</span>
-      <button class="btn-use-genre" data-genre="${g}"
-        style="font-size:10px;padding:3px 8px;border-radius:6px;background:rgba(108,99,255,0.06);border:1px solid rgba(108,99,255,0.18);color:#6C63FF;cursor:pointer;font-family:inherit">Use</button>
+      <span style="text-align:right">${c.preferredScale}</span>
+      <button class="btn-use-genre" data-genre="${g}">Use</button>
     </div>`;
   }).join('');
 }
@@ -487,7 +765,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('.genre-rail').addEventListener('click', (e) => {
     const pill = e.target.closest('.genre-pill');
     if (!pill) return;
-    document.querySelectorAll('.genre-pill').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.genre-rail .genre-pill').forEach(b => b.classList.remove('active'));
     pill.classList.add('active');
     setGenreByName(pill.dataset.genre);
   });
@@ -515,7 +793,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetGenre = targetBtn.dataset.genre;
     const syncPill = document.querySelector(`.genre-pill[data-genre="${targetGenre}"]`);
     if(syncPill) {
-      document.querySelectorAll('.genre-pill').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.genre-rail .genre-pill').forEach(b => b.classList.remove('active'));
       syncPill.classList.add('active');
     }
     setGenreByName(targetGenre);
@@ -534,7 +812,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupOptionGroup('modelList');
 
   // Initialize Canvas layouts
+  startBackground();
   stopWave();
+  drawRoll(-1);
   drawTrainChart();
   buildScaleNotes('major');
   buildGenreChart();
